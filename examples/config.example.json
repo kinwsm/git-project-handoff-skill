@@ -1,0 +1,14 @@
+{
+  "interval_seconds": 30,
+  "projects": [
+    {
+      "id": "demo",
+      "name": "Demo",
+      "repository": "YOUR_GITHUB_NAME/YOUR_PROJECT_SHARE",
+      "branch": "main",
+      "path": "HANDOFF.md",
+      "allow_public_repository": false,
+      "local_root": "C:/path/to/your/local/project"
+    }
+  ]
+}
