@@ -25,7 +25,7 @@ class AppServer:
                 binary, 'app-server', stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL, limit=4_000_000)
             self.pump = asyncio.create_task(self.receive())
-            await self.call('initialize', {'clientInfo':{'name':'git_project_handoff','version':'0.2.0'}})
+            await self.call('initialize', {'clientInfo':{'name':'git_project_handoff','version':'2.0.1'}})
             self.write({'method':'initialized','params':{}})
 
     def write(self, message):

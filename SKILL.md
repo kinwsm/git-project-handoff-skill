@@ -1,5 +1,6 @@
 ---
 name: git-project-handoff
+license: MIT
 description: Set up or operate a GitHub HANDOFF.md workflow where ChatGPT reads shared project documents and passes approved work to local Codex for execution and verification.
 metadata:
   short-description: Coordinate ChatGPT and Codex through Git
@@ -9,7 +10,7 @@ metadata:
 
 在用户希望 ChatGPT 讨论、Codex 执行的项目里，用专用 `HANDOFF.md` 保留任务、版本、执行回执和验收证据。技能可以指导部署和使用；只有实际配置的 GitHub 连接、本地监听器与 Codex CLI 才能传递和执行任务。
 
-需要安装、登记新项目、启动或复现验收时，阅读 [WORKFLOW.md](WORKFLOW.md)。需要请求字段、状态与故障恢复细节时，阅读 [references/protocol.md](references/protocol.md)。
+需要安装、登记新项目、启动或复现验收时，阅读 [WORKFLOW.md](WORKFLOW.md)。为聊天端配置协作规则时，填写 [ChatGPT 指令模板](examples/CHATGPT_INSTRUCTIONS.md)。需要请求字段、状态与故障恢复细节时，阅读 [references/protocol.md](references/protocol.md)。
 
 ## 运行交接
 

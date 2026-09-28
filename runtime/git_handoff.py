@@ -26,7 +26,7 @@ def now():
 def parse_document(text, project_id):
     if len(text.encode('utf-8')) > 256000 or text.count(BEGIN) != 1 or text.count(END) != 1:
         raise ValueError('Expected exactly one bounded handoff block')
-    block = text.split(BEGIN, 1)[1].split(END, 1)[0].strip()
+    block = text.split(BEGIN, 1)[1].split(END, 1)[0].strip().replace('\r\n', '\n')
     if not block.startswith('```json\n') or not block.endswith('\n```'):
         raise ValueError('Handoff block must contain one JSON code fence')
     data = json.loads(block[8:-4])
@@ -54,7 +54,9 @@ def parse_document(text, project_id):
 def render_document(text, data):
     before, rest = text.split(BEGIN, 1)
     _, after = rest.split(END, 1)
-    return before + BEGIN + '\n```json\n' + json.dumps(data, ensure_ascii=False, indent=2) + '\n```\n' + END + after
+    newline = '\r\n' if '\r\n' in rest.split(END, 1)[0] else '\n'
+    block = ('\n```json\n' + json.dumps(data, ensure_ascii=False, indent=2) + '\n```\n').replace('\n', newline)
+    return before + BEGIN + block + END + after
 
 
 def payload(item):
@@ -165,14 +167,35 @@ class Watcher:
                     self.db.execute('INSERT INTO git_requests(request_id,payload) VALUES(?,?)', (item['request_id'], raw))
                     self.db.commit()
         count = 0
-        for row in self.db.execute('SELECT * FROM git_requests').fetchall():
+        for row in self.db.execute('SELECT * FROM git_requests ORDER BY rowid').fetchall():
             item = json.loads(row['payload'])
             receipt = json.loads(row['receipt']) if row['receipt'] else None
             remote = next((r for r in document['requests'] if r['request_id'] == item['request_id']), None)
+            key = item['request_id']
+            dispatched = self.db.execute('SELECT 1 FROM handoffs WHERE request_id=?', (key,)).fetchone()
+            if remote is None and (not dispatched or (receipt and receipt['state'] in ('completed', 'failed', 'blocked', 'cancelled'))):
+                # Finished entries can be archived; removed queued entries are not consent to execute.
+                continue
             if remote is None or payload(remote) != item:
                 raise ValueError('Recorded request removed or changed; dispatch refused')
-            key = item['request_id']
-            if receipt is None or receipt.get('state') not in ('completed', 'failed', 'blocked', 'unknown'):
+            if not dispatched and remote['status'] != 'pending':
+                if remote['status'] != 'cancelled':
+                    continue
+                if receipt is None:
+                    receipt = {'state': 'cancelled', 'thread_id': None, 'turn_id': None,
+                               'response': '', 'truncated': False, 'updated_at': now()}
+                    self.db.execute('UPDATE git_requests SET receipt=? WHERE request_id=?',
+                                    (json.dumps(receipt, ensure_ascii=False), key))
+                    self.db.commit()
+            if receipt is None or receipt.get('state') not in ('completed', 'failed', 'blocked', 'unknown', 'cancelled'):
+                if not dispatched:
+                    # Recheck immediately before dispatch, after any earlier queue item completed.
+                    _, _, latest = await self.github.read()
+                    current = next((r for r in latest['requests'] if r['request_id'] == key), None)
+                    if current is None or current['status'] != 'pending':
+                        continue
+                    if payload(current) != item:
+                        raise ValueError('Queued request changed before dispatch; refused')
                 delivery = await self.handoffs.send(key, message(self.project, item))
                 if delivery['status'] == 'unknown':
                     state = 'unknown'
@@ -204,7 +227,7 @@ class Watcher:
 
 
 def load_config(path):
-    data = json.loads(path.read_text(encoding='utf-8'))
+    data = json.loads(path.read_text(encoding='utf-8-sig'))
     projects = data['projects']
     seen = set()
     for p in projects:

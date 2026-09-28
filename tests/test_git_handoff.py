@@ -7,7 +7,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'runtime'))
 import unittest
 
-from git_handoff import BEGIN, END, GitHub, Watcher, parse_document, render_document
+from git_handoff import BEGIN, END, GitHub, Watcher, load_config, parse_document, render_document
 
 ITEM = {'request_id': 'check_20260923', 'status': 'pending', 'task': 'Only reply ACK',
         'acceptance': 'Reply ACK without changes', 'base_commit': 'a'*40}
@@ -80,6 +80,65 @@ class Tests(unittest.IsolatedAsyncioTestCase):
             parse_document(doc([ITEM, ITEM]), 'demo')
         with self.assertRaises(ValueError):
             parse_document(text, 'different-project')
+
+    def test_windows_newlines_and_bom(self):
+        text = '\ufeff' + doc([ITEM]).replace('\n', '\r\n')
+        data = parse_document(text, 'demo')
+        rendered = render_document(text, data)
+        self.assertEqual(parse_document(rendered, 'demo'), data)
+        self.assertTrue(rendered.startswith('\ufeffprose\r\n'))
+        self.assertTrue(rendered.endswith('\r\ntail'))
+
+    def test_windows_config_bom(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'config.json'
+            data = {'projects': [PROJECT]}
+            path.write_text(json.dumps(data), encoding='utf-8-sig')
+            self.assertEqual(load_config(path), data)
+
+    async def test_queued_draft_waits_until_pending(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server = FakeServer()
+            remote = FakeGitHub([ITEM, {**ITEM, 'request_id': 'queued_request'}])
+            w = Watcher(PROJECT, Path(tmp), server, remote)
+            try:
+                await w.tick()
+                server.done = True
+                remote.data['requests'][1]['status'] = 'draft'
+                await w.tick()
+                self.assertEqual(sum(m == 'turn/start' for m, p in server.calls), 1)
+                remote.data['requests'][1]['status'] = 'pending'
+                await w.tick()
+                self.assertEqual(sum(m == 'turn/start' for m, p in server.calls), 2)
+            finally:
+                w.db.close()
+
+    async def test_cancelled_queue_is_not_dispatched_after_restart(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server = FakeServer()
+            remote = FakeGitHub([ITEM, {**ITEM, 'request_id': 'queued_request'}])
+            w = Watcher(PROJECT, Path(tmp), server, remote)
+            await w.tick()
+            remote.data['requests'][1]['status'] = 'cancelled'
+            w.db.close()
+            server.done = True
+            w = Watcher(PROJECT, Path(tmp), server, remote)
+            await w.tick()
+            await w.tick()
+            self.assertEqual(sum(m == 'turn/start' for m, p in server.calls), 1)
+            self.assertEqual(remote.data['requests'][1]['status'], 'cancelled')
+            w.db.close()
+
+    async def test_completed_requests_can_be_archived(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server, remote = FakeServer(), FakeGitHub([ITEM])
+            server.done = True
+            w = Watcher(PROJECT, Path(tmp), server, remote)
+            await w.tick()
+            remote.data['requests'] = [{**ITEM, 'request_id': 'next_request'}]
+            await w.tick()
+            self.assertEqual(sum(m == 'turn/start' for m, p in server.calls), 2)
+            w.db.close()
 
     async def test_exactly_once_and_receipt(self):
         with tempfile.TemporaryDirectory() as tmp:

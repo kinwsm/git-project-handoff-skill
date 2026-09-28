@@ -2,6 +2,8 @@
 
 **ChatGPT 读项目资料、讨论方案；Codex 在本机执行和验证；GitHub 交接文档保存请求与回执。**
 
+当前维护版：**v2.0.1 · MIT 开源**。下载本仓库即可获得 skill 与全部运行文件；运行代码仅使用 Python 标准库，无需额外 `pip install`。
+
 V2 将这条链路整理为可复现的工作流：可调用的 Codex skill、可配置的本地监听器、交接文档模板、只读预检和离线验证都在本仓库。V1 的说明型版本保存在 Git 标签 [`v1`](https://github.com/kinwsm/git-project-handoff-skill/tree/v1)。
 
 ```text
@@ -42,4 +44,10 @@ ChatGPT 读取同一条回执并核对结果
 
 ## 当前验证范围
 
-V2 运行代码从 Windows 上已完成真实 ChatGPT→GitHub→Codex→GitHub→ChatGPT 往返的本地实现整理而来。公开包会运行离线测试和只读预检；新的项目必须按 [工作流](WORKFLOW.md)自己完成一次真实往返，才能声称它的连接已打通。macOS/Linux 的执行逻辑包含文件锁支持，但尚未做真实往返验收。
+V2 运行代码从 Windows 上已完成真实 ChatGPT→GitHub→Codex→GitHub→ChatGPT 往返的本地实现整理而来。v2.0.1 已在 Windows 上通过离线测试、真实仓库只读预检，以及独立临时目录中的真实 Codex 执行测试（返回指定标记、目录无修改）。[自动验证](https://github.com/kinwsm/git-project-handoff-skill/actions/workflows/verify.yml)运行 Windows/Linux 和 Python 3.11/3.13 的离线测试。
+
+新的项目必须按 [工作流](WORKFLOW.md)自己完成一次真实往返，才能声称它的连接已打通。普通只读 GitHub 连接不能自动提交请求；聊天端必须实际具备更新 `HANDOFF.md` 的工具。macOS/Linux 尚未做真实 Codex 往返验收。
+
+## 许可证
+
+本项目采用 [MIT License](LICENSE)。使用、修改和再分发时按许可证保留版权与许可声明。V1 和初始 V2 标签保持原样；许可证随 v2.0.1 及之后的发布包提供。
