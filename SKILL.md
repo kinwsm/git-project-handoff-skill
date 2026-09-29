@@ -12,6 +12,8 @@ metadata:
 
 需要安装、登记新项目、启动或复现验收时，阅读 [WORKFLOW.md](WORKFLOW.md)。为聊天端配置协作规则时，填写 [ChatGPT 指令模板](examples/CHATGPT_INSTRUCTIONS.md)。需要请求字段、状态与故障恢复细节时，阅读 [references/protocol.md](references/protocol.md)。
 
+更换聊天账号、连接或模型时，使用 [聊天端能力验收](examples/CHATGPT_CAPABILITY_CHECK.md)。配置执行模型或分析消耗时，阅读 [模型与用量](references/models-and-usage.md)。发生登录、审批、派发或回写异常时，查 [恢复指引](references/recovery.md)，不要自动更换模型或重发不确定任务。
+
 ## 运行交接
 
 1. 确认当前会话真实可用的 GitHub 读写工具、本地监听器和已登记项目。聊天只能读取已推送的授权快照；不能把它当成本机未推送文件。没有实际通路时，指出缺失环节，不声称已唤醒 Codex。

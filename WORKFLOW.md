@@ -20,13 +20,15 @@ Set-Location $skillPath
 Copy-Item examples/config.example.json config.json
 ```
 
-上述安装跟随 `main` 分支。要精确复现本次维护版，可在克隆时加上 `--branch v2.0.1`；这会停在固定标签，后续需主动选择新标签，不能使用 `git pull` 更新。
+上述安装跟随 `main` 分支。要精确复现本次版本，可在克隆时加上 `--branch v2.1.0`；这会停在固定标签，后续需主动选择新标签，不能使用 `git pull` 更新。
 
 已有同名 skill 时，先确认旧目录是否为 Git 克隆；可更新的克隆使用 `git pull --ff-only`，其他安装先保留旧目录再安装。重启 Codex 后，新 skill 才会被发现。
 
 此包的 Python 运行代码只依赖标准库。当前 Windows 实测 Codex CLI 版本为 `0.158.0-alpha.2.1`。其他版本先做下面的可选执行测试。安装后可以在 Codex 中用 `$git-project-handoff` 调用 skill；ChatGPT 端则复制并填写 [`CHATGPT_INSTRUCTIONS.md`](examples/CHATGPT_INSTRUCTIONS.md)，让新的聊天也知道交接规则。两端账号和连接分别配置，安装 skill 不会自动给 ChatGPT 增加 GitHub 工具。
 
 编辑 `config.json` 中的 `id`、`name`、`repository`、`branch` 和 `local_root`。`local_root` 是本机真实项目的绝对路径；`repository` 只接受 `owner/name`。默认只监听仓库根目录的 `HANDOFF.md`，并拒绝公开仓库；确需公开交接时，在逐项检查请求和回执暴露范围后显式设置 `allow_public_repository: true`。`config.json` 已被 Git 忽略，不要提交包含本地路径的配置。
+
+可选的 `model` 和 `reasoning_effort` 默认为 `null`，继承本机配置。先运行 `python runtime/git_handoff.py --models` 查询当前账号支持的值，再明确填写；详见 [模型与用量](references/models-and-usage.md)。此查询不启动模型轮次。模型不可用时不会自动换成其他模型。
 
 将 [`examples/HANDOFF.example.md`](examples/HANDOFF.example.md) 复制为**项目共享仓库**根目录的 `HANDOFF.md`，把其中 `project_id` 改成配置里的 `id`，再由项目所有者在共享仓库执行 `git add HANDOFF.md`、`git commit -m "Add handoff entry"` 与 `git push -u origin HEAD`。模板中 `requests` 为空，不会唤醒 Codex。其他项目资料也需先按各自授权推送；此工具不会自动上传本地目录。
 
@@ -36,7 +38,7 @@ Copy-Item examples/config.example.json config.json
 python runtime/git_handoff.py --check --config config.json
 ```
 
-预检读取配置与 GitHub 交接文档，确认本地目录、Codex 命令、文档格式，并输出当前 `pending_request_ids`；它不创建 Codex 任务。首次运行前检查这个列表，确认没有历史待执行请求。配置或账号访问错误必须先解决。
+预检读取配置与 GitHub 交接文档，确认本地目录、Codex 登录、模型选择和文档格式，并输出当前 `pending_request_ids`；它启动本地接口服务查询状态，但不创建 Codex 任务或启动模型轮次。首次运行前检查这个列表，确认没有历史待执行请求。配置或账号访问错误必须先解决。输出的 `chatgpt_access: not_verified_by_local_cli` 提醒你，本地账号访问成功不代表聊天端连接可用。
 
 如果还要确认 Codex 登录和当前接口可执行，可选择运行：
 
@@ -60,6 +62,8 @@ python runtime/git_handoff.py --run --config config.json
 
 ## 5. 验收一次完整往返
 
+可以把 [聊天端能力验收提示词](examples/CHATGPT_CAPABILITY_CHECK.md) 发给目标聊天。它会按真实读取、写入及回执证据，区分无法读取、手动交接、执行未验证和自动交接已验证。下面是请求格式的具体示例。
+
 先用不会修改项目文件的任务验证连接。在 ChatGPT 中要求它直接通过**自己的 GitHub 工具**重新读取项目仓库的 `HANDOFF.md`，查重后用当前 blob SHA 追加唯一请求：
 
 ```json
@@ -75,6 +79,18 @@ python runtime/git_handoff.py --run --config config.json
 示例 ID 只能用一次；实际运行请换成新的 ID。`base_commit` 必须指向该项目仓库已存在的提交。聊天更新交接文件时应保留其他条目，并提交完整文件与刚读取的 blob SHA。若更新工具报错，先重新读取远端确认是否已经写入，不能直接换 ID 重发。
 
 等待监听器处理后，让 ChatGPT 再次直接读取 `HANDOFF.md`，核对同一 `request_id` 的 `receipt.thread_id`、`receipt.turn_id`、最终答复与预期标记。`completed` 仅代表 Codex 轮次结束，还需检查验收条件。成功后再提交真正的工程任务。
+
+## 6. 验收一次真实代码修改
+
+```powershell
+python runtime/verify_coding.py
+```
+
+这会消耗一次 Codex 调用，在 `.handoff-state/acceptance/` 的新目录中复制 [小型编程项目](examples/coding-demo/README.md)，先确认测试失败，再让 Codex 实现函数。验证程序独立重跑六项测试，并确认只有 `text_tools.py` 改变，随后保存交接回执、`evidence.json` 和测试输出。输出目录保留用于复核；不会复用已有目录。最长执行等待 5 分钟。可通过 `--model`、`--effort` 明确选择当前账号支持的配置。
+
+此测试使用真实 Codex 和本地交接测试适配器，输出明确标记 `local_fixture_not_github`，不证明 ChatGPT 或 GitHub 权限。要验证远端编程闭环，按示例 README 把同一小项目放入专用私有仓库，再从 ChatGPT 提交任务并读取结果。
+
+回执的 `metrics` 记录模型、耗时和可取得的 token 数据；未取得的数据为 `null`，不计为零。模型实际使用、服务改道、缓存和重试计数的范围见 [模型与用量](references/models-and-usage.md)。错误码与人工恢复步骤见 [恢复指引](references/recovery.md)。
 
 ## 停止、恢复和边界
 

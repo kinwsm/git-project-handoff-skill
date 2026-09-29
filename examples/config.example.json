@@ -8,6 +8,8 @@
       "branch": "main",
       "path": "HANDOFF.md",
       "allow_public_repository": false,
+      "model": null,
+      "reasoning_effort": null,
       "local_root": "C:/path/to/your/local/project"
     }
   ]

@@ -18,6 +18,8 @@
 - `task` 与 `acceptance`：各 1–6000 字符，明确工作范围和可核验结果。
 - `receipt`：由监听器填写，包含 `state`、`thread_id`、`turn_id`、最终答复 `response`、截断标记与更新时间。
 
+v2.1.0 的回执还包含 `metrics`，记录本地模型选择、实际解析值、耗时和可取得的用量；不可取得的数据保留为空。`failure_code` 标识执行失败、中断或需要人工审批等终态原因。字段细节见 [模型与用量](models-and-usage.md)及[恢复指引](recovery.md)。这些是回执的可选扩展，请求的 `schema_version` 仍为 1，旧请求无需改写。
+
 监听器把任务更新为 `running`，结束时写 `completed`、`failed` 或 `blocked`；无法确认派发结果时写 `unknown`。任务 ID、正文、验收和依据版本在提交后不能改变；若需要修订，使用新 ID。`completed` 是 Codex 轮次结束，业务验收还需要检查实际结果。
 
 更新文件前要重新读取完整正文及 blob SHA。按 ID 查重后，只追加新请求并使用读取到的 SHA 做并发校验；冲突时重新读取、保留所有其他条目和回执。若 GitHub 工具报错、超时或被拦截，先读取远端确认请求是否已存在，再决定下一步。

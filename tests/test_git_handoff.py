@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'runtime'))
 import unittest
 
 from git_handoff import BEGIN, END, GitHub, Watcher, load_config, parse_document, render_document
+from app_server import SetupError
 
 ITEM = {'request_id': 'check_20260923', 'status': 'pending', 'task': 'Only reply ACK',
         'acceptance': 'Reply ACK without changes', 'base_commit': 'a'*40}
@@ -223,6 +224,38 @@ class Tests(unittest.IsolatedAsyncioTestCase):
         data = parse_document(remote.text, 'demo')
         self.assertEqual(len(data['requests']), 2)
         self.assertEqual(data['requests'][1]['status'], 'pending')
+
+    async def test_permission_failure_keeps_actionable_code(self):
+        class DeniedGitHub(GitHub):
+            def __init__(self):
+                self.project = PROJECT
+                self.writes = 0
+            async def read(self):
+                return 'sha', doc([ITEM]), parse_document(doc([ITEM]), 'demo')
+            async def api(self, endpoint, body=None):
+                self.writes += 1
+                raise SetupError('github_permission', 'Denied')
+        remote = DeniedGitHub()
+        with self.assertRaises(SetupError) as error:
+            await remote.publish(ITEM, {}, 'running')
+        self.assertEqual(error.exception.code, 'github_permission')
+        self.assertEqual(remote.writes, 1)
+
+    async def test_interactive_approval_is_reported_blocked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server, remote = FakeServer(), FakeGitHub([ITEM])
+            server.done = True
+            server.observations = {('test-thread', 'test-turn'): {'attention_required': 'approval_required'}}
+            watcher = Watcher(PROJECT, Path(tmp), server, remote)
+            try:
+                await watcher.tick()
+                receipt = remote.data['requests'][0]['receipt']
+                self.assertEqual(receipt['state'], 'blocked')
+                self.assertEqual(receipt['failure_code'], 'approval_required')
+                await watcher.tick()
+                self.assertEqual(sum(m == 'turn/start' for m, p in server.calls), 1)
+            finally:
+                watcher.db.close()
 
 
     def test_shipped_template_matches_config(self):

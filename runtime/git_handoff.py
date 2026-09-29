@@ -12,7 +12,7 @@ import shutil
 import subprocess
 import tempfile
 
-from app_server import AppServer, Handoffs
+from app_server import AppServer, Handoffs, SetupError, model_catalog, validate_selection
 
 BASE = Path(__file__).resolve().parent
 BEGIN = '<!-- CODEX_HANDOFF_START -->'
@@ -91,7 +91,11 @@ class GitHub:
                                          creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         if result.returncode:
             # Do not copy credential-bearing diagnostics into published receipts.
-            raise RuntimeError('GitHub API failed: '+str(result.returncode))
+            diagnostic = result.stderr.decode('utf-8', errors='replace')
+            code = next((value for status, value in ((401, 'github_login'), (403, 'github_permission'),
+                (404, 'github_not_found'), (409, 'github_conflict'), (429, 'github_rate_limit'))
+                if re.search(r'HTTP\s+' + str(status), diagnostic)), 'github_api_error')
+            raise SetupError(code, 'GitHub request failed; see references/recovery.md ('+code+')')
         return json.loads(result.stdout)
 
     async def verify_visibility(self):
@@ -122,6 +126,9 @@ class GitHub:
                     'branch': self.project['branch'], 'sha': sha, 'content': content,
                     'message': 'Record Codex handoff '+original['request_id']+' '+state})
                 return
+            except SetupError as error:
+                if error.code not in ('github_conflict', 'github_api_error', 'github_rate_limit'):
+                    raise
             except RuntimeError:
                 continue
         raise RuntimeError('Receipt publish failed; will retry without resending task')
@@ -146,7 +153,8 @@ class Watcher:
         self.server = server or AppServer()
         self.github = github or GitHub(project)
         self.handoffs = Handoffs(state_dir/(project['id']+'.sqlite3'), self.server,
-                                  root=project['local_root'], title_prefix=project['name']+' · 执行｜')
+                                  root=project['local_root'], title_prefix=project['name']+' · 执行｜',
+                                  model=project.get('model'), effort=project.get('reasoning_effort'))
         self.db = self.handoffs.db
         self.db.execute('CREATE TABLE IF NOT EXISTS git_requests (request_id TEXT PRIMARY KEY, payload TEXT NOT NULL, receipt TEXT)')
         self.db.commit()
@@ -204,9 +212,15 @@ class Watcher:
                     result = await self.handoffs.status(key)
                     execution = result.get('execution_status')
                     state = {'completed': 'completed', 'failed': 'failed', 'interrupted': 'blocked'}.get(execution, 'running')
+                    if state in ('completed', 'failed', 'blocked') and result.get('metrics', {}).get('attention_required'):
+                        state = 'blocked'
                 candidate = {'state': state, 'thread_id': result.get('thread_id'),
                              'turn_id': result.get('turn_id'), 'response': result.get('response', ''),
-                             'truncated': result.get('truncated', False)}
+                             'truncated': result.get('truncated', False), 'metrics': result.get('metrics', {})}
+                if state == 'failed':
+                    candidate['failure_code'] = 'execution_failed'
+                elif state == 'blocked':
+                    candidate['failure_code'] = candidate['metrics'].get('attention_required', 'execution_interrupted')
                 if state == 'unknown':
                     candidate['note'] = 'Delivery uncertain; never automatically resubmit under a new ID.'
                 # Stable timestamp means repeated polling causes no unnecessary commits.
@@ -238,6 +252,11 @@ def load_config(path):
             raise ValueError('Invalid registered repository')
         if not isinstance(p.get('allow_public_repository', False), bool):
             raise ValueError('allow_public_repository must be boolean')
+        for field in ('model', 'reasoning_effort'):
+            if p.get(field) is not None and (not isinstance(p[field], str) or not p[field].strip()):
+                raise ValueError(field+' must be null or a non-empty string')
+        if p.get('reasoning_effort') and not p.get('model'):
+            raise SetupError('model_required', 'Set model explicitly when setting reasoning_effort')
         if p['path'] != 'HANDOFF.md' or not re.fullmatch(r'[A-Za-z0-9_/-]+', p['branch']):
             raise ValueError('Invalid handoff path/branch')
         if not Path(p['local_root']).is_absolute() or not Path(p['local_root']).is_dir():
@@ -278,9 +297,31 @@ async def check(config_path):
         await github.verify_visibility()
         sha, _, document = await github.read()
         pending = [item['request_id'] for item in document['requests'] if item['status'] == 'pending']
+        server = AppServer()
+        try:
+            await server.start()
+            account = await server.call('account/read', {'refreshToken': False})
+            if account.get('requiresOpenaiAuth') and not account.get('account'):
+                raise SetupError('codex_login', 'Run codex login before dispatch')
+            await validate_selection(server, project.get('model'), project.get('reasoning_effort'))
+        finally:
+            await server.close()
         print(json.dumps({'project_id': project['id'], 'repository': project['repository'],
                           'branch': project['branch'], 'handoff_blob': sha,
-                          'pending_request_ids': pending}, ensure_ascii=False))
+                          'pending_request_ids': pending, 'model': project.get('model'),
+                          'reasoning_effort': project.get('reasoning_effort'),
+                          'chatgpt_access': 'not_verified_by_local_cli'}, ensure_ascii=False))
+
+
+async def list_models():
+    server = AppServer()
+    try:
+        entries = await model_catalog(server)
+        for entry in entries:
+            print(json.dumps({'model': entry.get('model'), 'is_default': entry.get('isDefault'),
+                              'efforts': [e['reasoningEffort'] for e in entry.get('supportedReasoningEfforts', [])]}, ensure_ascii=False))
+    finally:
+        await server.close()
 
 
 async def run(config_path):
@@ -302,7 +343,8 @@ async def run(config_path):
                         count = await watcher.tick()
                         status['projects'][watcher.project['id']] = {'checked_at': now(), 'ok': True, 'requests': count}
                     except Exception as error:
-                        status['projects'][watcher.project['id']] = {'checked_at': now(), 'ok': False, 'error': str(error)[:300]}
+                        status['projects'][watcher.project['id']] = {'checked_at': now(), 'ok': False,
+                            'error_code': getattr(error, 'code', type(error).__name__), 'error': str(error)[:300]}
                 status['updated_at'] = now()
                 atomic_json(state_dir/'status.json', status)
                 await asyncio.sleep(max(10, config.get('interval_seconds', 30)))
@@ -320,5 +362,11 @@ if __name__ == '__main__':
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument('--check', action='store_true', help='Read-only preflight; never dispatch')
     mode.add_argument('--run', action='store_true', help='Poll and dispatch pending requests')
+    mode.add_argument('--models', action='store_true', help='List account model capabilities without a model turn')
     args = parser.parse_args()
-    asyncio.run(check(args.config) if args.check else run(args.config))
+    try:
+        asyncio.run(list_models() if args.models else check(args.config) if args.check else run(args.config))
+    except (ValueError, RuntimeError, OSError) as error:
+        print(json.dumps({'ok': False, 'error_code': getattr(error, 'code', type(error).__name__),
+                          'error': str(error)[:300]}, ensure_ascii=False))
+        raise SystemExit(1)

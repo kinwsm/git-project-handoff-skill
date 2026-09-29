@@ -2,7 +2,9 @@
 
 **ChatGPT 读项目资料、讨论方案；Codex 在本机执行和验证；GitHub 交接文档保存请求与回执。**
 
-当前维护版：**v2.0.1 · MIT 开源**。下载本仓库即可获得 skill 与全部运行文件；运行代码仅使用 Python 标准库，无需额外 `pip install`。
+当前版本：**v2.1.0 · MIT 开源**。下载本仓库即可获得 skill 与全部运行文件；运行代码仅使用 Python 标准库，无需额外 `pip install`。
+
+新版增加 [聊天端能力验收](examples/CHATGPT_CAPABILITY_CHECK.md)、[按项目选择模型和记录消耗](references/models-and-usage.md)、[真实编程验收项目](examples/coding-demo/README.md)及[故障恢复指引](references/recovery.md)。能力以当前账号实际工具和验证结果为准。
 
 V2 将这条链路整理为可复现的工作流：可调用的 Codex skill、可配置的本地监听器、交接文档模板、只读预检和离线验证都在本仓库。V1 的说明型版本保存在 Git 标签 [`v1`](https://github.com/kinwsm/git-project-handoff-skill/tree/v1)。
 
@@ -44,7 +46,7 @@ ChatGPT 读取同一条回执并核对结果
 
 ## 当前验证范围
 
-V2 运行代码从 Windows 上已完成真实 ChatGPT→GitHub→Codex→GitHub→ChatGPT 往返的本地实现整理而来。v2.0.1 已在 Windows 上通过离线测试、真实仓库只读预检，以及独立临时目录中的真实 Codex 执行测试（返回指定标记、目录无修改）。[自动验证](https://github.com/kinwsm/git-project-handoff-skill/actions/workflows/verify.yml)运行 Windows/Linux 和 Python 3.11/3.13 的离线测试。
+V2 运行代码从 Windows 上已完成真实 ChatGPT→GitHub→Codex→GitHub→ChatGPT 往返的本地实现整理而来。v2.1.0 在 Windows 上完成了隔离的真实编程验收：Codex 修改目标函数，独立运行的六项测试通过，且只修改了允许的文件，并取得模型、耗时和用量回执。该编程测试的 GitHub 传输由本地测试适配器代替，不代表新账号的聊天端通路已经验证。[自动验证](https://github.com/kinwsm/git-project-handoff-skill/actions/workflows/verify.yml)运行 Windows/Linux 和 Python 3.11/3.13 的离线测试。
 
 新的项目必须按 [工作流](WORKFLOW.md)自己完成一次真实往返，才能声称它的连接已打通。普通只读 GitHub 连接不能自动提交请求；聊天端必须实际具备更新 `HANDOFF.md` 的工具。macOS/Linux 尚未做真实 Codex 往返验收。
 
